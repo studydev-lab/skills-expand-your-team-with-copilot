@@ -577,6 +577,9 @@ document.addEventListener("DOMContentLoaded", () => {
           </div>
         `
         }
+        <button class="share-button" data-activity="${name}" aria-label="Share this activity">
+          <span class="share-icon">📤</span> Share
+        </button>
       </div>
     `;
 
@@ -596,7 +599,87 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
+    // Add click handler for share button
+    const shareButton = activityCard.querySelector(".share-button");
+    shareButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      shareActivity(name, details, shareButton);
+    });
+
     activitiesList.appendChild(activityCard);
+  }
+
+  // Share an activity with friends
+  function shareActivity(name, details, triggerButton) {
+    const schedule = formatSchedule(details);
+    const shareText = `Check out "${name}" at Mergington High School!\n${details.description}\nSchedule: ${schedule}`;
+    const shareUrl = window.location.href;
+
+    if (navigator.share) {
+      navigator.share({
+        title: `${name} - Mergington High School`,
+        text: shareText,
+        url: shareUrl,
+      }).catch((error) => {
+        if (error.name !== "AbortError") {
+          console.error("Error sharing:", error);
+        }
+      });
+    } else {
+      showShareMenu(name, shareText, shareUrl, triggerButton);
+    }
+  }
+
+  // Show a share options dropdown near the trigger button
+  function showShareMenu(name, shareText, shareUrl, triggerButton) {
+    // Remove any existing share menu
+    const existing = document.getElementById("share-menu");
+    if (existing) {
+      existing.remove();
+      return;
+    }
+
+    const encodedText = encodeURIComponent(shareText);
+    const encodedUrl = encodeURIComponent(shareUrl);
+    const emailSubject = encodeURIComponent(`${name} - Mergington High School`);
+
+    const menu = document.createElement("div");
+    menu.id = "share-menu";
+    menu.className = "share-menu";
+    menu.innerHTML = `
+      <button class="share-option" id="share-copy">📋 Copy Link</button>
+      <a class="share-option" href="https://wa.me/?text=${encodedText}%20${encodedUrl}" target="_blank" rel="noopener noreferrer">💬 WhatsApp</a>
+      <a class="share-option" href="mailto:?subject=${emailSubject}&body=${encodedText}%0A${encodedUrl}" target="_blank" rel="noopener noreferrer">✉️ Email</a>
+    `;
+
+    // Position the menu near the trigger button
+    document.body.appendChild(menu);
+    const rect = triggerButton.getBoundingClientRect();
+    const menuTop = rect.top + window.scrollY - menu.offsetHeight - 8;
+    const menuLeft = rect.left + window.scrollX;
+    menu.style.top = `${menuTop}px`;
+    menu.style.left = `${menuLeft}px`;
+
+    // Copy link button handler
+    menu.querySelector("#share-copy").addEventListener("click", () => {
+      navigator.clipboard.writeText(shareUrl).then(() => {
+        showMessage("Link copied to clipboard!", "success");
+      }).catch(() => {
+        showMessage("Could not copy link. Please copy the address bar.", "info");
+      });
+      menu.remove();
+    });
+
+    // Close menu when clicking outside
+    function onOutsideClick(event) {
+      if (!menu.contains(event.target) && event.target !== triggerButton) {
+        menu.remove();
+        document.removeEventListener("click", onOutsideClick);
+      }
+    }
+    setTimeout(() => {
+      document.addEventListener("click", onOutsideClick);
+    }, 0);
   }
 
   // Event listeners for search and filter
