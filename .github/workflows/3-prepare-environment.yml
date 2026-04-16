@@ -1,0 +1,193 @@
+name: Step 3 # 환경 준비
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/**"
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+env:
+  STEP_4_FILE: ".github/steps/4-play-time.md"
+
+jobs:
+  find_exercise:
+    name: 실습 이슈 찾기
+    uses: skills-kr/exercise-toolkit/.github/workflows/find-exercise-issue.yml@kr-v0.6.0
+
+  check_step_work:
+    name: 단계 작업 확인
+    runs-on: ubuntu-latest
+    needs: [find_exercise]
+    env:
+      ISSUE_REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ needs.find_exercise.outputs.issue-number }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: 응답 템플릿 가져오기
+        uses: actions/checkout@v5
+        with:
+          repository: skills-kr/exercise-toolkit
+          path: exercise-toolkit
+          ref: kr-v0.6.0
+
+      - name: 마지막 댓글 찾기
+        id: find-last-comment
+        uses: peter-evans/find-comment@v3
+        with:
+          repository: ${{ env.ISSUE_REPOSITORY }}
+          issue-number: ${{ env.ISSUE_NUMBER }}
+          direction: last
+
+      - name: 댓글 업데이트 - 작업 확인 중
+        uses: GrantBirki/comment@v2.1.1
+        with:
+          repository: ${{ env.ISSUE_REPOSITORY }}
+          issue-number: ${{ env.ISSUE_NUMBER }}
+          comment-id: ${{ steps.find-last-comment.outputs.comment-id }}
+          file: exercise-toolkit/markdown-templates/step-feedback/checking-work.md
+          edit-mode: replace
+      # START: Check practical exercise
+
+      - name: 파일 변경 사항 확인
+        id: changed-files
+        uses: tj-actions/changed-files@v46.0.5
+
+      - name: copilot-instructions.md 확인
+        id: check-instructions
+        continue-on-error: true
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const changedFiles = '${{ steps.changed-files.outputs.all_changed_files }}'.split(' ');
+            let message = '';
+
+            if (!changedFiles.includes('.github/copilot-instructions.md')) {
+              message = 'You need to provide instructions in .github/copilot-instructions.md file';
+              core.setOutput('STEP_MESSAGE', message);
+              core.setFailed('The .github/copilot-instructions.md file was not modified');
+              return;
+            }
+
+            message = 'Provided instructions in `.github/copilot-instructions.md`';
+            core.setOutput('STEP_MESSAGE', message);
+
+      - name: copilot-setup-steps.yml 확인
+        id: check-setup-steps
+        continue-on-error: true
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const changedFiles = '${{ steps.changed-files.outputs.all_changed_files }}'.split(' ');
+            let message = '';
+
+            if (!changedFiles.includes('.github/workflows/copilot-setup-steps.yml')) {
+              message = 'You need to setup copilot-setup-steps.yml workflow';
+              core.setOutput('STEP_MESSAGE', message);
+              core.setFailed('The `copilot-setup-steps.yml` file was not modified');
+              return;
+            }
+
+            message = 'You setup the copilot-setup-steps.yml workflow';
+            core.setOutput('STEP_MESSAGE', message);
+
+      - name: 댓글 업데이트 - 단계 결과
+        uses: GrantBirki/comment@v2.1.1
+        with:
+          repository: ${{ env.ISSUE_REPOSITORY }}
+          issue-number: ${{ env.ISSUE_NUMBER }}
+          comment-id: ${{ steps.find-last-comment.outputs.comment-id }}
+          edit-mode: replace
+          file: exercise-toolkit/markdown-templates/step-feedback/step-results-table.md
+          vars: |
+            step_number: 3
+            results_table:
+              - description: ${{ steps.check-instructions.outputs.STEP_MESSAGE }}
+                passed: ${{ steps.check-instructions.outcome == 'success' }}
+              - description: ${{ steps.check-setup-steps.outputs.STEP_MESSAGE }}
+                passed: ${{ steps.check-setup-steps.outcome == 'success' }}
+
+      # END: Check practical exercise
+
+      - name: 모든 검사가 통과되지 않으면 실패
+        if: contains(steps.*.outcome, 'failure')
+        run: exit 1
+
+  post_next_step_content:
+    name: 다음 단계 내용 게시
+    needs: [find_exercise, check_step_work]
+    runs-on: ubuntu-latest
+    env:
+      ISSUE_REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ needs.find_exercise.outputs.issue-number }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: 응답 템플릿 가져오기
+        uses: actions/checkout@v5
+        with:
+          repository: skills-kr/exercise-toolkit
+          path: exercise-toolkit
+          ref: kr-v0.6.0
+
+      - name: 댓글 생성 - 단계 완료
+        uses: GrantBirki/comment@v2.1.1
+        with:
+          repository: ${{ env.ISSUE_REPOSITORY }}
+          issue-number: ${{ env.ISSUE_NUMBER }}
+          file: exercise-toolkit/markdown-templates/step-feedback/step-finished-prepare-next-step.md
+          vars: |
+            next_step_number: 4
+
+      - name: 댓글 생성 - 단계 내용 추가
+        uses: GrantBirki/comment@v2.1.1
+        with:
+          repository: ${{ env.ISSUE_REPOSITORY }}
+          issue-number: ${{ env.ISSUE_NUMBER }}
+          file: ${{ env.STEP_4_FILE }}
+          vars: |
+            full_repo_name: ${{ github.repository }}
+
+      - name: 댓글 생성 - 진행 상황 확인 중
+        uses: GrantBirki/comment@v2.1.1
+        with:
+          repository: ${{ env.ISSUE_REPOSITORY }}
+          issue-number: ${{ env.ISSUE_NUMBER }}
+          file: exercise-toolkit/markdown-templates/step-feedback/watching-for-progress.md
+
+      - name: 현재 워크플로우 비활성화 및 다음 워크플로우 활성화
+        run: |
+          gh workflow disable "${{github.workflow}}"
+          gh workflow enable "Step 4"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Workshop Tracker에 단계 보고
+        if: success()
+        continue-on-error: true
+        run: |
+          SESSION_ID=$(jq -r '.sessionId' .github/workshop-config.json)
+          TRACK=$(jq -r '.track' .github/workshop-config.json)
+          API_URL=$(jq -r '.apiUrl' .github/workshop-config.json)
+          curl -s -X POST "$API_URL" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "sessionId": "'"$SESSION_ID"'",
+              "type": "step",
+              "step": 3,
+              "description": "환경 준비",
+              "username": "'"$GITHUB_ACTOR"'",
+              "repo": "'"$GITHUB_REPOSITORY"'",
+              "track": "'"$TRACK"'",
+              "runId": "'"$GITHUB_RUN_ID"'"
+            }' || true
